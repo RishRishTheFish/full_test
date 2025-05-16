@@ -428,8 +428,17 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
         Operations::Touch => {
              // boundry testing the same as mkdirs
             if processed_location_opertation.split("/").last().unwrap().len() > 0 && processed_location_opertation.split("/").last().unwrap().len() < 13 {
-                let location = processed_location_opertation.clone();
-                filesystem.create(location, FsType::File(Rc::new(File::new(processed_location_opertation.clone(), size).into())));
+                let file_extention: Vec<&str> = processed_location_opertation.split("/").last().unwrap().split(".").collect();
+                if file_extention.get(1).is_some() {
+                    if processed_location_opertation.split("/").last().unwrap().contains(".") && file_extention.get(1).unwrap().len() == 3 {
+                        let location = processed_location_opertation.clone();
+                        filesystem.create(location, FsType::File(Rc::new(File::new(processed_location_opertation.clone(), size).into())));
+                    } else {
+                        println!("Your file extention needs to be 3 characters");
+                    }
+                } else {
+                    println!("You need a file extention");
+                }
             } else {
                 println!("File name has to be bigger than one character or lower than 13")
             }

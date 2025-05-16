@@ -1,5 +1,5 @@
 use core::panic;
-use std::{cell::{Ref, RefCell, RefMut}, env::current_dir, io::{stdin, stdout, Write}, ops::Deref, rc::Rc};
+use std::{cell::{Ref, RefCell, RefMut}, env::current_dir, io::{stdin, stdout, Write}, ops::Deref, rc::{Rc, Weak}};
 
 
 
@@ -24,17 +24,19 @@ impl File {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 struct Folder
 { 
     name: String,
+    parent: Option<Weak<RefCell<Folder>>>,
     children: Rc<RefCell<Vec<RefCell<FsType>>>>
 }
 impl Folder{
-    fn new(name: String) -> Folder{
+    fn new(name: String, parent: Option<Weak<RefCell<Folder>>>) -> Folder{
         Folder { 
             name, 
-            children: Rc::new(vec![].into())
+            children: Rc::new(vec![].into()),
+            parent,
         }
     }
     fn get_children() -> Vec<FsType>{
@@ -79,7 +81,7 @@ impl Object for FsType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 enum FsType {
     File(Rc<RefCell<File>>),
     Folder(Rc<RefCell<Folder>>)
@@ -120,21 +122,10 @@ impl Filesystem {
         }
     }
     fn has(&self, path: String) -> bool {
-        let path_components: Vec<String> = path.split("/").map(|s| s.to_string()).filter(|s| !s.is_empty()).collect();
-        self.current_dir.borrow().children.borrow().iter().any(|ref_object| {
-            let object = ref_object.borrow();
-            if object.get_type() == "folder" {
-                object.get_name() == path_components.last().unwrap().clone()
-            } else {
-                false
-            }
-        })
+        self.get(&path).is_some()
     }
     fn get(&self, path: &str) -> Option<Rc<RefCell<FsType>>> {
-        // let mut current: Rc<RefCell<FsType>> = self.root;
         let mut current= FsType::Folder(self.root.clone());
-        // let FsType::Folder(current) = (*self.root).borrow() {}
-
         let components = path.split('/').filter(|s| !s.is_empty());
     
         for part in components {
@@ -163,88 +154,42 @@ impl Filesystem {
     
         Some(Rc::new(RefCell::new(current)))
     }
-    
-    
-    
-    // fn remove(&mut self, path: String, object_type: FsType){
-    //     let path_components: Vec<String> = path.split("/").map(|s| s.to_string()).collect();
 
-    //     for item in path_components.iter(){
-    //         let item_data = self.current_dir;
-    //         //self.get(item.to_string());
-    //         if let Some(ref item_refcell) = item_data {
-    //             match object_type {
-    //                 FsType::File(ref new_file) => {
-    //                     if let FsType::Folder(ref mut folder) = *item_refcell.borrow_mut() {
-    //                         folder.borrow().children.borrow_mut().push(
-    //                             RefCell::new(FsType::File(new_file.clone()))
-    //                         );
-    //                     }
-    //                 },
-    //                 FsType::Folder(ref new_folder) => {
-    //                     if let FsType::Folder(ref mut folder) = *item_refcell.borrow_mut() {
-                            
-    //                         folder.borrow().children.borrow_mut().retain(|matching_fstype| {
-    //                             if let FsType::Folder(matching_folder) = matching_fstype.borrow().clone() {
-    //                                 *folder != matching_folder
-    //                             } else {
-    //                                 false
-    //                             }
-    //                         });
-    //                     }
-    //                 },
-    //             }
-    //         } else {
-    //             self.root.borrow().children.borrow_mut().push(
-    //                 match object_type {
-    //                     FsType::File(ref new_file) => {
-    //                         RefCell::new(FsType::File(new_file.clone()))
-    //                     },
-    //                     FsType::Folder(ref new_folder) => {
-    //                         RefCell::new(FsType::Folder(new_folder.clone()))
-    //                     },
-    //                 }
-    //             );
-    //         }
-    //     }
-    // }
-    fn create(&mut self, path: String, object_type: FsType){
+    fn create(&mut self, path: String, object_type: FsType) {
         let path_components: Vec<String> = path.split("/").map(|s| s.to_string()).collect();
-        //let item = &self.current_dir.borrow().name.clone();
-        // for item in path_components.iter(){
-            let item_data = Some(self.current_dir.clone());
-            if let Some(ref item_refcell) = item_data {
+        let mut buffer_dir = self.current_dir.clone();
+    
+        for path_part in path_components.clone() {
+            if path_part == *path_components.last().unwrap() {
+                
                 match object_type {
                     FsType::File(ref new_file) => {
-                        //if let FsType::Folder(ref mut folder) = *item_refcell.borrow_mut() {
-                            item_refcell.borrow().children.borrow_mut().push(
-                                RefCell::new(FsType::File(new_file.clone()))
-                            );
-                       // }
+                        buffer_dir.borrow().children.borrow_mut().push(
+                            RefCell::new(FsType::File(new_file.clone()))
+                        );
                     },
                     FsType::Folder(ref new_folder) => {
-                        //if let FsType::Folder(ref mut folder) = *item_refcell.borrow_mut() {
-                            item_refcell.borrow().children.borrow_mut().push(
-                                RefCell::new(FsType::Folder(new_folder.clone()))
-                            );
-                        //}
+                        buffer_dir.borrow().children.borrow_mut().push(
+                            RefCell::new(FsType::Folder(new_folder.clone()))
+                        );
                     },
                 }
             } else {
-                panic!("What happened!");
-                // self.root.borrow().children.borrow_mut().push(
-                //     match object_type {
-                //         FsType::File(ref new_file) => {
-                //             RefCell::new(FsType::File(new_file.clone()))
-                //         },
-                //         FsType::Folder(ref new_folder) => {
-                //             RefCell::new(FsType::Folder(new_folder.clone()))
-                //         },
-                //     }
-                // );
+                let weak_parent = Rc::downgrade(&buffer_dir);
+                let child = Rc::new(RefCell::new(Folder {
+                    name: path_part.clone(),
+                    parent: Some(weak_parent),
+                    children: RefCell::new(vec![]).into(),  
+                }));
+                buffer_dir.borrow().children.borrow_mut().push(
+                    RefCell::new(FsType::Folder(child.clone()))
+                );
+                buffer_dir = child;
+                //println!("{:#?}", buffer_dir);
             }
         }
-    //}
+    }
+    
 }
 
 fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, previous_location: String, location_operation: String) -> String {
@@ -252,17 +197,11 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
     match operation {
         Operations::None => final_location = "/".to_string(),
         Operations::Cd => {
-            println!("loc: {}", previous_location.clone() + "/" + &location_operation);
             if filesystem.has(previous_location.clone() + "/" + &location_operation) {
-                // if (previous_location.clone() + "/" + &location_operation) == "/" {
-                //     println!("root");
-                //     filesystem.current_dir = filesystem.root.clone();
-                // } else {
-                //     println!("non-root");
-                    if let FsType::Folder(folder) = filesystem.get(&(previous_location.clone() + "/" + &location_operation)).unwrap().borrow().clone(){
-                        filesystem.current_dir = folder;
-                        println!("setting current dir: {:#?}", filesystem.current_dir);
-                    }
+                if let FsType::Folder(folder) = filesystem.get(&(previous_location.clone() + "/" + &location_operation)).unwrap().borrow().clone(){
+                    filesystem.current_dir = folder;
+                    println!("setting current dir: {:#?}", filesystem.current_dir);
+                }
                // }
                 final_location = previous_location + "/" + &location_operation
             } else {
@@ -277,40 +216,47 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
         },
         Operations::Mkdir => {
                 let location = location_operation.clone();
-                filesystem.create(location, FsType::Folder(Rc::new(Folder::new(location_operation.clone()).into())));
+                filesystem.create(location, FsType::Folder(Rc::new(Folder::new(location_operation.split("/").last().unwrap().to_string(), None).into())));
         },
         Operations::Touch => {
-            let location = location_operation.clone();
-            filesystem.create(location, FsType::File(Rc::new(File::new(location_operation.clone()).into())));
+            if location_operation.len() < 1 && location_operation.len() < 13 {
+                let location = location_operation.clone();
+                filesystem.create(location, FsType::File(Rc::new(File::new(location_operation.clone()).into())));
+            } else {
+                println!("File name has to be bigger than one character or lower than 13")
+            }
         },
         Operations::Ls => {
-            let mut folder = filesystem.current_dir.clone(); // Default to current dir
-        
-            if !location_operation.is_empty() {
-                let target_path = previous_location.clone() + "/" + &location_operation;
-                if let Some(fs_obj) = filesystem.get(&target_path) {
-                    if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
-                        folder = folder_rc;
+            if location_operation.len() < 1 && location_operation.len() < 13 {
+            let mut folder = filesystem.current_dir.clone(); 
+                if !location_operation.is_empty() {
+                    let target_path = previous_location.clone() + "/" + &location_operation;
+                    if let Some(fs_obj) = filesystem.get(&target_path) {
+                        if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
+                            folder = folder_rc;
+                        } else {
+                            println!("{} is not a folder", location_operation);
+                            return previous_location;
+                        }
                     } else {
-                        println!("{} is not a folder", location_operation);
+                        println!("Folder not found: {}", location_operation);
                         return previous_location;
                     }
+                }
+            
+                let borrowed_folder = folder.borrow();
+                let children = borrowed_folder.children.borrow();
+                if children.is_empty() {
+                    println!("(empty)");
                 } else {
-                    println!("Folder not found: {}", location_operation);
-                    return previous_location;
+                    for child in children.iter() {
+                        let borrowed = child.borrow();
+                        println!("{}", borrowed.get_name());
+                    }
                 }
-            }
-        
-            let borrowed_folder = folder.borrow();
-            let children = borrowed_folder.children.borrow();
-            if children.is_empty() {
-                println!("(empty)");
-            } else {
-                for child in children.iter() {
-                    let borrowed = child.borrow();
-                    println!("{} ({})", borrowed.get_name(), borrowed.get_type());
-                }
-            }
+        } else {
+            println!("File name has to be bigger than one character or lower than 13")
+        }
         }
         
     }
@@ -327,6 +273,7 @@ fn main() {
     let root = Rc::new(RefCell::new(Folder {
         name: "/".to_string(),
         children: Rc::new(vec![].into()),
+        parent: None,
     }));
     let current_dir = root.clone();
     let mut filesystem: Filesystem = Filesystem::new(root, current_dir);

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io::{stdin, stdout, Write}, rc::{Rc, Weak}};
+use std::{cell::RefCell, io::{stdin, stdout, Write}, os::unix::fs::FileExt, rc::{Rc, Weak}};
 use std::str::FromStr;
 
 /// This will define some functions that any object should have, object being anything that can be a filesystem that is visible to the user and will contain other objects/or directly
@@ -485,7 +485,7 @@ fn main() {
     }));
     let current_dir = root.clone();
     let mut filesystem: Filesystem = Filesystem::new(root, current_dir);
-    let first_command = command_line("/".to_owned());
+    let first_command = command_line("".to_owned());
 
     // its useful to immediately split user input into arguments
     let mut args: Vec<String> = first_command.split(" ").map(|s| s.to_string()).collect();
@@ -533,10 +533,13 @@ fn main() {
         }
 
         args = new_args;
-        new_location = args.get(1).map_or("/", |v| v).to_string();
+        new_location = args.get(1).map_or("", |v| v).to_string();
         match args.get(0).unwrap().as_ref() {
             "cd" => {
                 current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
+                if current_location.is_empty(){
+                    filesystem.current_dir = filesystem.root.clone();
+                }
             },
             "ls" => {
                 _ = command_line_operation(Operations::Ls, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);

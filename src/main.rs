@@ -518,6 +518,7 @@ fn main() {
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "kyoto.jpg".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "miyajima.gif".to_string(), default_size);
     _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/".to_string(), default_size);
+    _ = command_line_operation(Operations::Ls, &mut filesystem, current_location.to_string(), "/".to_string(), default_size);
 
     loop {
         let new_args: Vec<String> = command_line(current_location.clone()).split(" ").map(|s| s.to_string()).collect();

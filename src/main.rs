@@ -204,36 +204,43 @@ impl Filesystem {
     /// I however can infer that any object leading to that point would be a folder, as a file cant contain another object
     fn create(&mut self, path: String, object_type: FsType) {
             
-        let path_components: Vec<String> = path
+        // I split path_components so I can process every folder until the final item, unlike get, I do not filter empty strings, as its useful 
+        // in setting the current directory to root
+        let mut path_components: Vec<String> = path
             .split('/')
-            .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
+ 
+        // Like current for get, I have a buffer dir because you can navigate relitive to current_dir in a variety of ways, and while traversing to make a object
+        // you dont want to be moved through multiple directories to the new one, or however far it goes, so this will not reflect on the current directory
+        // also, this will support either the current directory or root if the first item is a /, which will make the first empty, and pick based on that
+        let mut buffer_dir = if path_components.first().unwrap().is_empty() {
+            self.root.clone()
+        } else {
+            self.current_dir.clone()
+        };
+        // then remove the first empty string otherwise it will attempt to create a empty folder
+        path_components.retain(|s| !s.is_empty());
     
-        
-        let mut buffer_dir = self.current_dir.clone();
-    
-        for path_part in path_components.iter() {
-            if path_components.last().unwrap() == path_part {
-                match object_type {
-                    FsType::File(ref new_file) => {
-                        buffer_dir.borrow().children.borrow_mut().push(
-                            RefCell::new(FsType::File(new_file.clone())),
-                        );
-                    }
-                    FsType::Folder(ref new_folder) => {
-                        buffer_dir.borrow().children.borrow_mut().push(
-                            RefCell::new(FsType::Folder(new_folder.clone())),
-                        );
-                    }
-                }
+        // Go over the path components but this time I will also count the index as the last path_part wont match the last path_component so I have to do index tracking
+        for (index, path_part) in path_components.iter().enumerate() {
+            // if I am not on the last path, then I will create a new folder, otherwise it will create the given object type
+            if index == path_components.len() - 1 {
+                buffer_dir.borrow().children.borrow_mut().push(object_type.clone().into());
             } else {
+                // set a found folder to be optional with the standard smart pointers, so if its not found
+                // no bad operation will be attemoted on it
                 let mut found_folder: Option<Rc<RefCell<Folder>>> = None;
     
+                // Put it in a scope so buffer_dir_borrow and children are dropped, as you cant re-assign to refmuts
+                // that are currently being borrowed, the same effect can be used with the drop function
                 {
+                    // let bindings so the borrow lives for the intended duration
                     let buffer_dir_borrow = buffer_dir.borrow();
                     let children = buffer_dir_borrow.children.borrow();
     
+                    // Currently we are only looking for folders so it will try to get the type from folders then match the name, makes sure found_folder is set
+                    // to the folder that matches a path part, then breaks the loop
                     for child in children.iter() {
                         if let FsType::Folder(existing_folder) = &*child.borrow() {
                             if existing_folder.borrow().name == *path_part {
@@ -243,9 +250,11 @@ impl Filesystem {
                         }
                     }
                 } 
+                // if a part was found, it will set the buffer dir
                 if let Some(folder) = found_folder {
                     buffer_dir = folder;
-                } else {
+                } else {    
+                    // otherwise it will make a new folder
                     let weak_parent = Rc::downgrade(&buffer_dir);
                     let new_folder = Rc::new(RefCell::new(Folder {
                         name: path_part.clone(),
@@ -265,58 +274,49 @@ impl Filesystem {
         }
     }
 
+    /// This function is structured alot like the create function, however due to alot of diffrences, they cannot be compressed into two small functions and one big function
+    /// the arguments are the same with the same purpose except to remove, and object type will be the type matched for removal
+    /// any comments here will point out diffrences
     fn remove(&mut self, path: String, object_type: FsType) {
-            
-        let path_components: Vec<String> = path
+
+        let mut path_components: Vec<String> = path
             .split('/')
-            .filter(|s| !s.is_empty())
+            // .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
     
+        let mut buffer_dir = if path_components.first().unwrap().is_empty() {
+            self.root.clone()
+        } else {
+            self.current_dir.clone()
+        };
+        path_components.retain(|s| !s.is_empty());
         
-        let mut buffer_dir = self.current_dir.clone();
-    
-        for path_part in path_components.iter() {
-            if path_components.last().unwrap() == path_part {
-                match object_type {
-                    FsType::File(ref new_file) => {
-                        let borrowed_buffer = buffer_dir.borrow();
-                        let borrowed_children =  borrowed_buffer.children.borrow_mut();
-                        let final_result: Rc<RefCell<Vec<RefCell<FsType>>>> = Rc::new(
-                            RefCell::new(
-                                borrowed_children.iter().filter(
-                                |object| !(object.borrow().get_name() == FsType::File(new_file.clone()).get_name() && object.borrow().get_type() == "file")
-                                ).map(|child| child.clone()).collect()
-                            )
-                        );
-                        let borrowed_children_size = borrowed_children.len().clone();
-                        drop(borrowed_children);
-                        drop(borrowed_buffer);
-                        if final_result.borrow().len() != borrowed_children_size { 
-                            buffer_dir.borrow_mut().children = final_result;
-                        } else {
-                            println!("Nothing was removed");
-                        }
-                    },
-                    FsType::Folder(ref new_folder) => {
-                        let borrowed_buffer = buffer_dir.borrow();
-                        let borrowed_children =  borrowed_buffer.children.borrow_mut();
-                        let final_result: Rc<RefCell<Vec<RefCell<FsType>>>> = Rc::new(
-                            RefCell::new(
-                                borrowed_children.iter().filter(
-                                |object| !(object.borrow().get_name() == FsType::Folder(new_folder.clone()).get_name() && object.borrow().get_type() == "folder")
-                                ).map(|child| child.clone()).collect()
-                            )
-                        );
-                        let borrowed_children_size = borrowed_children.len().clone();
-                        drop(borrowed_children);
-                        drop(borrowed_buffer);
-                        if final_result.borrow().len() != borrowed_children_size { 
-                            buffer_dir.borrow_mut().children = final_result;
-                        } else {
-                            println!("Nothing was removed");
-                        }
-                    },
+        for (index, path_part) in path_components.iter().enumerate() {
+            if index == path_components.len() - 1 {
+                let borrowed_buffer = buffer_dir.borrow();
+                let borrowed_children =  borrowed_buffer.children.borrow_mut();
+
+                // here for final result, this time around, it exists to provide a vector without the object type, matching it 
+                // with both name and type, to ensure the proper object is removed
+                let final_result: Rc<RefCell<Vec<RefCell<FsType>>>> = Rc::new(
+                    RefCell::new(
+                        borrowed_children.iter().filter(
+                        |object| !(object.borrow().get_name() == object_type.get_name() && object.borrow().get_type() == object_type.get_type())
+                        ).map(|child| child.clone()).collect()
+                    )
+                );
+                // we will clone the original length of the vector representing the buffer dirs contents, for comparison later
+                let borrowed_children_size = borrowed_children.len().clone();
+                // here, instead of dropping via scope, we drop using the rust functions, as you cant re-assign to refmuts that are currently being borrowed
+                // we do this because we will re-assign the children to the buffer dir to be the new one, if something changed
+                drop(borrowed_children);
+                drop(borrowed_buffer);
+                if final_result.borrow().len() != borrowed_children_size { 
+                    buffer_dir.borrow_mut().children = final_result;
+                } else {
+                    // I did not mirror the create portion of this as in rare instances nothing would be removed, this would catch that case
+                    println!("Nothing was removed");
                 }
             } else {
                 let mut found_folder: Option<Rc<RefCell<Folder>>> = None;
@@ -337,42 +337,48 @@ impl Filesystem {
                 if let Some(folder) = found_folder {
                     buffer_dir = folder;
                 } else {
-                    let weak_parent = Rc::downgrade(&buffer_dir);
-                    let new_folder = Rc::new(RefCell::new(Folder {
-                        name: path_part.clone(),
-                        parent: Some(weak_parent),
-                        children: RefCell::new(vec![]).into(),
-                    }));
-    
-                    buffer_dir
-                        .borrow()
-                        .children
-                        .borrow_mut()
-                        .push(RefCell::new(FsType::Folder(new_folder.clone())));
-    
-                    buffer_dir = new_folder;
+                    // We should not create paths on the way to remove a object
+                    println!("path does not exist for what your trying to remove");
                 }
             }
         }
     } 
 }
 
+/// command_line_operation will preform the actual operations, its a abstraction layer which will turn the strings into enum varients
+/// but the main reason this function is seperate is because of returning the new path, which only one operation does, but would require alot of logic if I were to attempt to
+/// do this is main, it will take the operation, whole filesystem, previous_location, which is the current location, like where the user is
+/// and the location operation, which is what the user is either cd'ing into or modifying
 fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, previous_location: String, location_operation: String) -> String {
     let mut final_location: String = "".to_owned(); 
     match operation {
         Operations::Cd => {
-            if filesystem.get(&(previous_location.clone() + "/" + &location_operation)).is_some() {
-                if let FsType::Folder(folder) = filesystem.get(&(previous_location.clone() + "/" + &location_operation)).unwrap().borrow().clone(){
-                    filesystem.current_dir = folder;
-                    final_location = previous_location + "/" + &location_operation
+            // this is the only operation which will return a string which will be used to set the current location
+            // first check that the thing the user is cd'ing into is not nothing
+            if !(location_operation == "/") {
+                // if the location the user is trying to cd into even exists
+                if filesystem.get(&(previous_location.clone() + "/" + &location_operation)).is_some() {
+                    // if what they are trying to cd into is even a folder
+                    if let FsType::Folder(folder) = filesystem.get(&(previous_location.clone() + "/" + &location_operation)).unwrap().borrow().clone(){
+                        filesystem.current_dir = folder;
+                        final_location = previous_location + "/" + &location_operation
+                    } else {
+                        println!("You tried to cd into a file");
+                        final_location = previous_location
+                    }
                 } else {
-                    println!("You tried to cd into a file");
+                    println!("Folder does not exist");
+                    // for all else statements, continue on with the current location, so if it fails the user isnt reset to root
+                    final_location = previous_location
                 }
             } else {
-                println!("Folder does not exist");
+                // cd with either / or nothing defaults to root
+                filesystem.current_dir = filesystem.root.clone();
+                final_location = "/".to_string();
             }
         },
         Operations::Rm => {
+            // for removal, have to ensure that you use the specific type you want to remove
             let location = location_operation.clone();
             filesystem.remove(location, FsType::File(Rc::new(File::new(location_operation.clone()).into())));
         },
@@ -381,6 +387,7 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
             filesystem.remove(location, FsType::Folder(Rc::new(Folder::new(location_operation.split("/").last().unwrap().to_string(), None).into())));
         },
         Operations::Mkdir => {
+            // boundry testing to ensure locations are bigger than 0 and smaller than 13
             if location_operation.len() > 0 && location_operation.len() < 13 {
                 let location = location_operation.clone();
                 filesystem.create(location, FsType::Folder(Rc::new(Folder::new(location_operation.split("/").last().unwrap().to_string(), None).into())));
@@ -389,6 +396,7 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
             }                
         },
         Operations::Touch => {
+             // boundry testing the same as mkdirs
             if location_operation.len() > 0 && location_operation.len() < 13 {
                 let location = location_operation.clone();
                 filesystem.create(location, FsType::File(Rc::new(File::new(location_operation.clone()).into())));
@@ -397,32 +405,34 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
             }
         },
         Operations::Ls => {
+            // Ls will take the current folder and clone it to avoid memory issues
             let mut folder = filesystem.current_dir.clone(); 
-                if !location_operation.is_empty() {
-                    let target_path = previous_location.clone() + "/" + &location_operation;
-                    if let Some(fs_obj) = filesystem.get(&target_path) {
-                        if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
-                            folder = folder_rc;
-                        } else {
-                            println!("{} is not a folder", location_operation);
-                            return previous_location;
-                        }
+            // if it isnt empty, it will re-use some of my copied logic to try and get the contents of the directory the user is picking
+            if !location_operation.is_empty() {
+                let target_path = previous_location.clone() + "/" + &location_operation;
+                if let Some(fs_obj) = filesystem.get(&target_path) {
+                    if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
+                        folder = folder_rc;
                     } else {
-                        println!("Folder not found: {}", location_operation);
+                        println!("{} is not a folder", location_operation);
                         return previous_location;
                     }
-                }
-            
-                let borrowed_folder = folder.borrow();
-                let children = borrowed_folder.children.borrow();
-                if children.is_empty() {
-                    println!("(empty)");
                 } else {
-                    for child in children.iter() {
-                        let borrowed = child.borrow();
-                        println!("{}", borrowed.get_name());
-                    }
+                    println!("Folder not found: {}", location_operation);
+                    return previous_location;
                 }
+            }
+        
+            let borrowed_folder = folder.borrow();
+            let children = borrowed_folder.children.borrow();
+            if children.is_empty() {
+                println!("(empty)");
+            } else {
+                for child in children.iter() {
+                    let borrowed = child.borrow();
+                    println!("{}", borrowed.get_name());
+                }
+            }
         }
         
     }

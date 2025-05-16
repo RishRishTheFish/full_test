@@ -385,7 +385,7 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
         Operations::Cd => {
             // this is the only operation which will return a string which will be used to set the current location
             // first check that the thing the user is cd'ing into is not nothing
-            if !(processed_location_opertation == "/") {
+            if !(location_operation == "/") {
                 // if the location the user is trying to cd into even exists
                 if filesystem.get(&(processed_previous_location.clone() + "/" + &processed_location_opertation)).is_some() {
                     // if what they are trying to cd into is even a folder

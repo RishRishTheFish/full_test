@@ -353,95 +353,107 @@ impl Filesystem {
 /// do this is main, it will take the operation, whole filesystem, previous_location, which is the current location, like where the user is
 /// and the location operation, which is what the user is either cd'ing into or modifying
 fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, previous_location: String, location_operation: String, size: usize) -> String {
-    // Makes  new vector which will take up the processed path, process as in it will add .., . and other functionality
-    let mut parts: Vec<&str> = Vec::new();
 
-    // if it starts with something that signifies a absolute path, it should make a empty vector, otherwise split
-    // the current location, aka previous location, into its parts, and filter out the empty ones, including the one at the beginning
-    if location_operation.starts_with('/') {
-        parts = vec![];
-    } else {
-        parts = previous_location.split('/').filter(|s| !s.is_empty()).collect();
-    }
-
-    // match some of the basic operations, if there is a .., remove the first item from the array, to move back otherwise just add the path
-    for part in location_operation.split('/') {
-        match part {
-            "." => {},
-            "" => {},
-            ".." => { parts.pop(); },
-            path => parts.push(path),
+    // This is a binding for  a longer lasting value
+    let binding = location_operation.clone();
+    // this will process the previous locations and new location operation so you can use .. and . operators
+    // for .. operators it will pop from the coorosponding vectors, leading to the removal from the final path, depending on how far its going, so if it went past
+    // the new location, it will go into your current location
+    // if its a ., ignore it, and if its anything else, add it as the path, then join
+    let location_arr: Vec<&str> = binding.split('/').filter(|s| !s.is_empty()).collect();
+    let mut processed_previous_location: Vec<&str> = previous_location.split("/").collect();
+    let mut processed_location_opertation: Vec<&str> = Vec::new();
+    
+    for path in location_arr {
+        if path == ".." {
+            if processed_location_opertation.len() == 0 {
+                processed_previous_location.pop();
+            } else {
+                processed_location_opertation.pop(); 
+            }
+        } else if path == "." {
+            continue;
+        } else {
+            processed_location_opertation.push(path);
         }
     }
-
-    // join it into a final path
-    let resolved_path = format!("{}", parts.join("/"));
-
-    // will be used eventually in the return value
+    
+    let processed_previous_location = processed_previous_location.join("/");
+    let processed_location_opertation = processed_location_opertation.join("/");
     let mut final_location: String = "".to_owned(); 
-
     match operation {
         Operations::Cd => {
-            // the only operation which truely modifies the current directory
-            // if the resolved path is / which is root, clone root to set it as the current dir and set the final location
-            // otherwise get the directory to cd into
-            if resolved_path == "/" {
-                filesystem.current_dir = filesystem.root.clone();
-                final_location = "/".to_string();
-            } else if let Some(entry) = filesystem.get(&resolved_path) {
-                if let FsType::Folder(folder) = entry.borrow().clone() {
-                    // found the folder and can now set the current folder to it, and the final path
-                    filesystem.current_dir = folder;
-                    final_location = resolved_path;
+            // this is the only operation which will return a string which will be used to set the current location
+            // first check that the thing the user is cd'ing into is not nothing
+            if !(processed_location_opertation == "/") {
+                // if the location the user is trying to cd into even exists
+                if filesystem.get(&(processed_previous_location.clone() + "/" + &processed_location_opertation)).is_some() {
+                    // if what they are trying to cd into is even a folder
+                    if let FsType::Folder(folder) = filesystem.get(&(processed_previous_location.clone() + "/" + &processed_location_opertation)).unwrap().borrow().clone(){
+                        filesystem.current_dir = folder;
+                        final_location = processed_previous_location + "/" + &processed_location_opertation
+                    } else {
+                        println!("You tried to cd into a file");
+                        final_location = processed_previous_location
+                    }
                 } else {
-                    println!("You tried to cd into a file");
-                    final_location = previous_location;
+                    println!("Folder does not exist");
+                    // for all else statements, continue on with the current location, so if it fails the user isnt reset to root
+                    final_location = processed_previous_location
                 }
             } else {
-                println!("Folder does not exist");
-                // for else clasuses like this one, sets the final location to the current location so it isnt reset
-                final_location = previous_location;
+                // cd with either / or nothing defaults to root
+                filesystem.current_dir = filesystem.root.clone();
+                final_location = "/".to_string();
             }
         },
         Operations::Rm => {
-            filesystem.remove(resolved_path.clone(), FsType::File(Rc::new(File::new(resolved_path.clone(), size).into())));
+            // for removal, have to ensure that you use the specific type you want to remove
+            let location = processed_location_opertation.clone();
+            filesystem.remove(location, FsType::File(Rc::new(File::new(processed_location_opertation.clone(), size).into())));
         },
         Operations::Rmdir => {
-            filesystem.remove(resolved_path.clone(), FsType::Folder(Rc::new(Folder::new(resolved_path.split("/").last().unwrap().to_string(), None).into())));
+            let location = processed_location_opertation.clone();
+            filesystem.remove(location, FsType::Folder(Rc::new(Folder::new(processed_location_opertation.split("/").last().unwrap().to_string(), None).into())));
         },
         Operations::Mkdir => {
-            // boundries so the last part of a path has to be bigger than 0 characters and smaller than 13
-            if resolved_path.split("/").last().unwrap().len() > 0 && resolved_path.split("/").last().unwrap().len() < 13 {
-                filesystem.create(resolved_path.clone(), FsType::Folder(Rc::new(Folder::new(resolved_path.split("/").last().unwrap().to_string(), None).into())));
+            // boundry testing to ensure locations are bigger than 0 and smaller than 13
+            if processed_location_opertation.split("/").last().unwrap().len() > 0 && processed_location_opertation.split("/").last().unwrap().len() < 13 {
+                let location = processed_location_opertation.clone();
+                filesystem.create(location, FsType::Folder(Rc::new(Folder::new(processed_location_opertation.split("/").last().unwrap().to_string(), None).into())));
             } else {
-                println!("Folder name has to be bigger than one character or lower than 13");
-            }
+                println!("Folder name has to be bigger than one character or lower than 13")
+            }                
         },
         Operations::Touch => {
-            if resolved_path.split("/").last().unwrap().len() > 0 && resolved_path.split("/").last().unwrap().len() < 13 {
-                filesystem.create(resolved_path.clone(), FsType::File(Rc::new(File::new(resolved_path.clone(), size).into())));
+             // boundry testing the same as mkdirs
+            if processed_location_opertation.split("/").last().unwrap().len() > 0 && processed_location_opertation.split("/").last().unwrap().len() < 13 {
+                let location = processed_location_opertation.clone();
+                filesystem.create(location, FsType::File(Rc::new(File::new(processed_location_opertation.clone(), size).into())));
             } else {
-                println!("File name has to be bigger than one character or lower than 13");
+                println!("File name has to be bigger than one character or lower than 13")
             }
         },
         Operations::Ls => {
+            // Ls will take the current folder and clone it to avoid memory issues
             let mut folder = filesystem.current_dir.clone(); 
-            // if the current directory and the one derived from location_operation is the same, no need to look through the filesystem for it
-            if resolved_path != previous_location {
-                if let Some(fs_obj) = filesystem.get(&resolved_path) {
+            // if it isnt empty, it will re-use some of my copied logic to try and get the contents of the directory the user is picking
+            if !processed_location_opertation.is_empty() {
+                let target_path = processed_previous_location.clone() + "/" + &processed_location_opertation;
+                if let Some(fs_obj) = filesystem.get(&target_path) {
                     if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
                         folder = folder_rc;
                     } else {
-                        println!("{} isnt a folder", location_operation);
-                        return previous_location;
+                        println!("{} isnt a folder", processed_location_opertation);
+                        return processed_previous_location;
                     }
                 } else {
-                    println!("Folder isnt found: {}", location_operation);
-                    return previous_location;
+                    println!("Folder isnt found: {}", processed_location_opertation);
+                    return processed_previous_location;
                 }
             }
-
-            // let bindings for longer lived values (otherwise memory issues)
+        
+            // let statements so there can be longed lived values, as the compiler complains otherwise
             let borrowed_folder = folder.borrow();
             let children = borrowed_folder.children.borrow();
             if children.is_empty() {
@@ -453,8 +465,8 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
                 }
             }
         }
+        
     }
-
     final_location
 }
 
@@ -485,35 +497,35 @@ fn main() {
 
     // ALL the required default creations (there is alot)
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "home".to_string(), default_size);
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "home".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "home".to_string(), default_size);
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "documents".to_string(), default_size);
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "downloads".to_string(), default_size);
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "photos".to_string(), default_size);
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "music".to_string(), default_size);
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/documents".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/documents".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "cv.pdf".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "data.dat".to_string(), default_size);
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/music".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/music".to_string(), default_size);
     for i in 0..10 {
         _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), format!("{i}.mp3"), default_size);
     }
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/photos".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/photos".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "passport.jpg".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "photoid.png".to_string(), default_size);
     _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), "japan2026".to_string(), default_size);
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/photos/japan2026".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/home/photos/japan2026".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "tokyo.png".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "kyoto.jpg".to_string(), default_size);
     _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), "miyajima.gif".to_string(), default_size);
-    current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/".to_string(), default_size);
+    _ = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), "/".to_string(), default_size);
 
     loop {
         let new_args: Vec<String> = command_line(current_location.clone()).split(" ").map(|s| s.to_string()).collect();
-        let mut final_size = Some(default_size);
+        let mut final_size = default_size;
         if new_args.get(2).is_some(){
             let size = usize::from_str(new_args.get(2).unwrap());
             if size.is_ok() {
-                final_size = Some(size.unwrap());
+                final_size = size.unwrap();
             } else {
                 println!("You either entered a second argument that was not the file size or you had folders with spaces");
             }
@@ -523,22 +535,22 @@ fn main() {
         new_location = args.get(1).map_or("/", |v| v).to_string();
         match args.get(0).unwrap().as_ref() {
             "cd" => {
-                current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), new_location.clone(), default_size);
+                current_location = command_line_operation(Operations::Cd, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "ls" => {
-                _ = command_line_operation(Operations::Ls, &mut filesystem, current_location.to_string(), new_location.clone(), default_size);
+                _ = command_line_operation(Operations::Ls, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "mkdir" => {
-                _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), new_location.clone(), default_size);
+                _ = command_line_operation(Operations::Mkdir, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "touch" => {
-                _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), new_location.clone(), final_size.unwrap());
+                _ = command_line_operation(Operations::Touch, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "rm" => {
-                _ = command_line_operation(Operations::Rm, &mut filesystem, current_location.to_string(), new_location.clone(), default_size);
+                _ = command_line_operation(Operations::Rm, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "rmdir" => {
-                _ = command_line_operation(Operations::Rmdir, &mut filesystem, current_location.to_string(), new_location.clone(), default_size);
+                _ = command_line_operation(Operations::Rmdir, &mut filesystem, current_location.to_string(), new_location.clone(), final_size);
             },
             "exit" => {
         

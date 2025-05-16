@@ -1,3 +1,4 @@
+use core::borrow;
 use std::{cell::RefCell, io::{stdin, stdout, Write}, os::unix::fs::FileExt, rc::{Rc, Weak}};
 use std::str::FromStr;
 
@@ -42,7 +43,8 @@ struct Folder
 { 
     name: String,
     parent: Option<Weak<RefCell<Folder>>>,
-    children: Rc<RefCell<Vec<RefCell<FsType>>>>
+    children: Rc<RefCell<Vec<RefCell<FsType>>>>,
+    size: usize
 }
 
 /// Implimentation of Folder with a constructer function, all property access can be done 
@@ -55,6 +57,7 @@ impl Folder{
             name, 
             children: Rc::new(vec![].into()),
             parent,
+            size: 0,
         }
     }
 }
@@ -96,7 +99,7 @@ impl Object for FsType {
     fn get_size(&self) -> usize {
         match self {
             FsType::File(file) => file.borrow().fileSize,
-            FsType::Folder(folder) => 1,
+            FsType::Folder(folder) => folder.borrow().size,
         }
     }
 }
@@ -229,7 +232,9 @@ impl Filesystem {
         for (index, path_part) in path_components.iter().enumerate() {
             // if I am not on the last path, then I will create a new folder, otherwise it will create the given object type
             if index == path_components.len() - 1 {
-                buffer_dir.borrow().children.borrow_mut().push(object_type.clone().into());
+                let mut borrored_buffer = buffer_dir.borrow_mut();
+                borrored_buffer.children.borrow_mut().push(object_type.clone().into());
+                borrored_buffer.size = borrored_buffer.size + object_type.get_size();
             } else {
                 // set a found folder to be optional with the standard smart pointers, so if its not found
                 // no bad operation will be attemoted on it
@@ -263,6 +268,7 @@ impl Filesystem {
                         name: path_part.clone(),
                         parent: Some(weak_parent),
                         children: RefCell::new(vec![]).into(),
+                        size: 0,
                     }));
     
                     buffer_dir
@@ -450,8 +456,8 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
             if !processed_location_opertation.is_empty() {
                 let target_path = processed_previous_location.clone() + "/" + &processed_location_opertation;
                 if let Some(fs_obj) = filesystem.get(&target_path) {
-                    if let FsType::Folder(folder_rc) = fs_obj.borrow().clone() {
-                        folder = folder_rc;
+                    if let FsType::Folder(ref folder_rc) = *fs_obj.borrow_mut() {
+                        folder = folder_rc.clone();
                     } else {
                         println!("{} isnt a folder", processed_location_opertation);
                         return processed_previous_location;
@@ -461,7 +467,24 @@ fn command_line_operation(operation: Operations, filesystem: &mut Filesystem, pr
                     return processed_previous_location;
                 }
             }
-        
+            
+            // size logic
+            let mut total_size = folder.borrow().size.clone();
+            for item in folder.borrow().children.borrow().clone() {
+                let unwrappped_item = item.borrow();
+                if let FsType::Folder(ref child_folder) = &*unwrappped_item {
+                    let children = child_folder.borrow().children.borrow().clone();
+                    let new_size: usize = children.iter()
+                        .map(|child| child.borrow().get_size())
+                        .sum();
+                    child_folder.borrow_mut().size = new_size.clone();
+                    total_size = total_size + new_size;
+                }
+            }
+            println!("total size {}", total_size);
+            
+            // println!("{}", new_size);
+            // folder.borrow_mut().size = new_size;
             // let statements so there can be longed lived values, as the compiler complains otherwise
             let borrowed_folder = folder.borrow();
             let children = borrowed_folder.children.borrow();
@@ -491,6 +514,7 @@ fn main() {
         name: "/".to_string(),
         children: Rc::new(vec![].into()),
         parent: None,
+        size: 0,
     }));
     let current_dir = root.clone();
     let mut filesystem: Filesystem = Filesystem::new(root, current_dir);
@@ -535,7 +559,12 @@ fn main() {
         if new_args.get(2).is_some(){
             let size = usize::from_str(new_args.get(2).unwrap());
             if size.is_ok() {
-                final_size = size.unwrap();
+                if size.clone().unwrap() < 4194304 {
+                    final_size = size.unwrap();
+                } else {
+                    println!("too big");
+                    continue;
+                }
             } else {
                 println!("You either entered a second argument that was not the file size or you had folders with spaces");
             }
